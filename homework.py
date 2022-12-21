@@ -86,6 +86,8 @@ def check_response(response_data):
         logger.error('В ответе API домашки под ключом `homeworks`'
                      'данные приходят не в виде списка')
         raise TypeError
+    homework_list = response_data.get('homeworks')
+    return homework_list
 
 
 def parse_status(homework):
@@ -115,14 +117,19 @@ def main():
     logger.info('Инициализация бота')
     bot = telegram.Bot(token=TELEGRAM_TOKEN)
     timestamp = int(time.time())
+    old_message = ''
     while True:
         try:
             api_response = get_api_answer(timestamp)
             homework_response = check_response(api_response)
-            if len(homework_response.get('homeworks')) > 0:
-                message = parse_status(homework_response.get('homeworks')[0])
-                send_message(bot, message)
-                logger.debug(f'Сообщение {message} успешно отправлено')
+            if len(homework_response) > 0:
+                message = parse_status(homework_response[0])
+                if message != old_message:
+                    send_message(bot, message)
+                    logger.debug(f'Сообщение {message} успешно отправлено')
+                else:
+                    logger.debug('Статус не изменился')
+                    old_message = message
             timestamp = api_response['current_date']
         except Exception as error:
             message = f"Сбой в работе программы: {error}"
@@ -130,23 +137,6 @@ def main():
             logger.debug('Сообщение об ошибке отправлено')
         finally:
             time.sleep(RETRY_PERIOD)
-
-        #     new_message = parse_status(homework_response)
-        #     if new_message != old_message:
-        #         send_message(bot, new_message)
-        #         logger.debug('Сообщение успешно отправлено')
-        #         old_message = new_message
-        #     else:
-        #         logger.debug('Статус не изменился')
-        #         old_message = new_message
-        #     timestamp = api_response['current_date']
-
-        # except Exception as error:
-        #     message = f"Сбой в работе программы: {error}"
-        #     send_message(bot, message)
-        #     logger.debug('Сообщение об ошибке отправлено')
-        # finally:
-        #     time.sleep(RETRY_PERIOD)
 
 
 if __name__ == "__main__":
