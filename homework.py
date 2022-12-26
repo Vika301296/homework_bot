@@ -1,24 +1,16 @@
-import os
 import sys
 import time
 import requests
 import logging
 import telegram
-
-from logging.handlers import RotatingFileHandler
+import os
 from dotenv import load_dotenv
+from logging.handlers import RotatingFileHandler
 
+
+from exceptions import NoHomeworkNameError, WrongApiResponseCodeError
 
 load_dotenv()
-
-logger = logging.getLogger(__name__)
-logger.setLevel(logging.DEBUG)
-handler = RotatingFileHandler("logger.log", maxBytes=50000000, backupCount=5)
-logger.addHandler(handler)
-formatter = logging.Formatter(
-    "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
-)
-handler.setFormatter(formatter)
 
 PRACTICUM_TOKEN = os.getenv("PRACTICUM_TOKEN")
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
@@ -36,74 +28,68 @@ HOMEWORK_VERDICTS = {
 }
 
 
-class NoHomeworkName(Exception):
-    """Исключение, которое выпадает, когда нет информации об имени дз."""
-
-    logger.error('В ответе API домашки нет ключа "homework_name"')
-
-
 def check_tokens():
     """Проверяем наличие всех токенов."""
-    return all((PRACTICUM_TOKEN, TELEGRAM_CHAT_ID, TELEGRAM_TOKEN))
+    return all((PRACTICUM_TOKEN,
+                TELEGRAM_CHAT_ID,
+                TELEGRAM_TOKEN))
 
 
 def send_message(bot, message):
     """Отправляем сообщение в Telegram чат."""
-    chat_id = TELEGRAM_CHAT_ID
+    logging.debug(f'Отправляем сообщение "{message}"')
     try:
-        bot.send_message(chat_id, message)
-        logger.debug(f'Сообщение {message} успешно отправлено')
+        bot.send_message(TELEGRAM_CHAT_ID, message)
+        logging.debug(f'Сообщение {message} успешно отправлено')
     except Exception:
-        logger.error('Сбой при отправке сообщения в Telegram')
+        logging.error('Сбой при отправке сообщения в Telegram')
 
 
-def get_api_answer(timestamp):
+def get_api_answer(timestamp) -> dict:
     """Делаем запрос к API Яндекс.Практикума."""
+    logging.debug(f'Делаем запрос к API в "{timestamp}"')
     try:
-        params = {"from_date": timestamp}
+        params = {'from_date': timestamp}
         response = requests.get(
             url=ENDPOINT, headers=HEADERS, params=params
         )
     except requests.RequestException:
-        logger.critical('Ошибка доступа к API')
+        logging.error('Ошибка доступа к API')
     if response.status_code != 200:
-        logger.critical('Ошибка доступа к API')
-        raise requests.RequestException
+        logging.error('Ошибка доступа к API')
+        raise WrongApiResponseCodeError
     return response.json()
 
 
-def check_response(response_data):
+def check_response(response_data) -> list:
     """Проверяет соответствует ли ответ API документации."""
     if not isinstance(response_data, dict):
-        logger.error('Структура данных ответа не соответствует содержанию')
-        raise TypeError
-    if isinstance(response_data, list):
-        logger.error('Структура данных ответа не соответствует содержанию')
-        raise TypeError
+        logging.error('Структура данных ответа не соответствует содержанию')
+        raise TypeError('Данные ответа не соответствуют документации API')
     if not response_data.get('homeworks'):
         raise KeyError('В ответе сервера нет информации о дз')
-    if not isinstance(response_data["homeworks"], list):
-        logger.error('В ответе API домашки под ключом `homeworks`'
-                     'данные приходят не в виде списка')
+    if not isinstance(response_data['homeworks'], list):
+        logging.error('В ответе API домашки под ключом `homeworks`'
+                      'данные приходят не в виде списка')
         raise TypeError
-    homework_list = response_data.get('homeworks')
-    return homework_list
+    return response_data.get('homeworks')
 
 
-def parse_status(homework):
+def parse_status(homework) -> str:
     """Извлекаем из информации о домашней работе статус этой работы."""
-    status = homework["status"]
-    verdict = HOMEWORK_VERDICTS.get(status)
-    homework_name = homework.get("homework_name")
-
+    status = homework.get('status')
     if 'homework_name' not in homework:
-        logger.error('Отсутствует имя работы в ответе сервера')
-        raise NoHomeworkName('В ответе API домашки нет ключа "homework_name"')
+        logging.error('Отсутствует имя работы в ответе сервера')
+        raise NoHomeworkNameError(
+            'В ответе API домашки нет ключа "homework_name"')
     if status not in HOMEWORK_VERDICTS:
-        logger.error(
+        logging.error(
             'Неожиданный статус домашней работы в ответе API'
         )
-        raise NoHomeworkName
+        raise NoHomeworkNameError
+
+    verdict = HOMEWORK_VERDICTS.get(status)
+    homework_name = homework.get('homework_name')
     return (f'Изменился статус проверки работы'
             f' "{homework_name}". {verdict}'
             )
@@ -112,9 +98,9 @@ def parse_status(homework):
 def main():
     """Основная логика работы бота."""
     if not check_tokens():
-        logger.critical("Отсутствуют токены", exc_info=True)
+        logging.critical('Отсутствуют токены', exc_info=True)
         sys.exit(1)
-    logger.info('Инициализация бота')
+    logging.info('Инициализация бота')
     bot = telegram.Bot(token=TELEGRAM_TOKEN)
     timestamp = int(time.time())
     old_message = ''
@@ -126,18 +112,25 @@ def main():
                 message = parse_status(homework_response[0])
                 if message != old_message:
                     send_message(bot, message)
-                    logger.debug(f'Сообщение {message} успешно отправлено')
+                    logging.debug(f'Сообщение {message} успешно отправлено')
                 else:
-                    logger.debug('Статус не изменился')
+                    logging.debug('Статус не изменился')
                     old_message = message
             timestamp = api_response['current_date']
         except Exception as error:
-            message = f"Сбой в работе программы: {error}"
+            message = f'Сбой в работе программы: {error}'
             send_message(bot, message)
-            logger.debug('Сообщение об ошибке отправлено')
+            logging.error('Сообщение об ошибке отправлено')
         finally:
             time.sleep(RETRY_PERIOD)
 
 
 if __name__ == "__main__":
+    handler = RotatingFileHandler(
+        'logger.log', maxBytes=50000000, backupCount=5)
+    logging.basicConfig(
+        format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+        level=logging.DEBUG,
+        handlers=[handler])
+
     main()
