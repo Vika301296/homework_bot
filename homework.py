@@ -9,6 +9,7 @@ from logging.handlers import RotatingFileHandler
 
 
 from exceptions import NoHomeworkNameError, WrongApiResponseCodeError
+from exceptions import SendMessageError
 
 load_dotenv()
 
@@ -40,7 +41,8 @@ def send_message(bot, message):
         bot.send_message(TELEGRAM_CHAT_ID, message)
         logging.debug(f"Сообщение {message} успешно отправлено")
     except Exception:
-        raise ConnectionError
+        logging.error('Сообщение не отправлено')
+        raise SendMessageError('Сообщение не отправлено!')
 
 
 def get_api_answer(timestamp) -> dict:
@@ -52,7 +54,6 @@ def get_api_answer(timestamp) -> dict:
     except Exception:
         requests.exceptions.RequestException
     if response.status_code != 200:
-        logging.error("Ошибка доступа к API")
         raise WrongApiResponseCodeError(
             f'Код ответа от API {response.status_code}')
     return response.json()
@@ -73,11 +74,9 @@ def parse_status(homework) -> str:
     """Извлекаем из информации о домашней работе статус этой работы."""
     status = homework.get("status")
     if "homework_name" not in homework:
-        logging.error("Отсутствует имя работы в ответе сервера")
         raise NoHomeworkNameError(
             'В ответе API домашки нет ключа "homework_name"')
     if status not in HOMEWORK_VERDICTS:
-        logging.error("Неожиданный статус домашней работы в ответе API")
         raise NoHomeworkNameError
 
     verdict = HOMEWORK_VERDICTS.get(status)
@@ -97,18 +96,18 @@ def main():
     while True:
         try:
             api_response = get_api_answer(timestamp)
-        except Exception:
-            logging.error("Ошибка доступа к API")
-        try:
             homework_response = check_response(api_response)
-        except Exception:
-            logging.error('Ответ API не соответствует документации')
-        try:
             if len(homework_response) > 0:
                 message = parse_status(homework_response[0])
                 if message != old_message:
-                    send_message(bot, message)
-                    logging.debug(f"Сообщение {message} успешно отправлено")
+                    try:
+                        send_message(bot, message)
+                        logging.debug(
+                            f"Сообщение {message} успешно отправлено")
+                    except SendMessageError as error:
+                        logging.error(
+                            f'При попытке отправить сообщение возникла {error}'
+                        )
                 else:
                     logging.debug("Статус не изменился")
                     old_message = message
