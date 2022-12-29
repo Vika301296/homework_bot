@@ -8,3 +8,9 @@ class WrongApiResponseCodeError(Exception):
     """Ошибка доступа к API."""
 
     pass
+
+
+class SendMessageError(Exception):
+    """Ошибка отправки сообщения."""
+
+    pass
